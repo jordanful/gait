@@ -4,6 +4,7 @@ import {program} from 'commander';
 import inquirer from 'inquirer';
 import input from '@inquirer/input';
 import select from '@inquirer/select';
+
 import chalk from 'chalk';
 import figlet from 'figlet';
 import os from 'os';
@@ -44,7 +45,7 @@ async function setupWizard() {
         const useExistingKeyAnswer = await inquirer.prompt([{
             type: 'confirm',
             name: 'useExisting',
-            message: `${chalk.bgGreen(`We found an existing OpenAI API key: ${chalk.yellow(maskedApiKey)}. Do you want to use it?`)}`,
+            message: `${chalk.green(`We found an existing OpenAI API key: ${chalk.yellow(maskedApiKey)}. Do you want to use it?`)}`,
             default: true
         }]);
 
@@ -53,7 +54,7 @@ async function setupWizard() {
         } else {
             const newApiKeyAnswer = await inquirer.prompt([{
                 type: 'password',
-                message: chalk.bgGreen('🔒Enter a new OpenAI API key (stored locally only):'),
+                message: chalk.green('🔒Enter a new OpenAI API key (stored locally only):'),
                 name: 'apiKey',
                 mask: '○'
             }]);
@@ -62,7 +63,7 @@ async function setupWizard() {
     } else {
         const newApiKeyAnswer = await inquirer.prompt([{
             type: 'password',
-            message: chalk.bgGreen('🔒Enter your OpenAI API key (stored locally only):'),
+            message: chalk.green('🔒Enter your OpenAI API key (stored locally only):'),
             name: 'apiKey',
             mask: '○'
         }]);
@@ -72,7 +73,7 @@ async function setupWizard() {
     const modelAnswer = await inquirer.prompt([
         {
             type: 'list',
-            message: chalk.bgGreen('Select a model (make sure your account has access):'),
+            message: chalk.green('Select a model (make sure your account has access):'),
             name: 'model',
             choices: [
                 'gpt-4-1106-preview',
@@ -84,11 +85,12 @@ async function setupWizard() {
     updateConfig({
         selectedModel: modelAnswer.model,
     })
-    console.log(chalk.green(`👍 We'll use ${modelAnswer.model}. You can update this anytime by running \`gait setup\` again.`));
+    console.log(chalk.gray(`👍 We'll use ${modelAnswer.model}. You can update this anytime by running \`gait setup\` again.`));
 }
 
 function runGitCommand(command) {
     exec(`git ${command}`, (error, stdout, stderr) => {
+        console.log(`Running git ${command}`)
         if (error) {
             console.error(`Error: ${error.message}`);
             return;
@@ -138,9 +140,8 @@ async function processCommand(command) {
         return;
     }
     const repoContext = gatherGitContext();
-    console.log(repoContext)
     const systemPrompt = await fetchSystemPrompt();
-    const completePrompt = `${systemPrompt}\nRepo context:${repoContext}\nUser's query: ${command}`;
+    const completePrompt = `${systemPrompt}\nRepo context:${JSON.stringify(repoContext, null, 2)}\nUser's query: ${command}`;
     const spinner = ora('Loading').start();
     spinner.color = 'green';
     const openai = new OpenAI({
@@ -153,11 +154,28 @@ async function processCommand(command) {
     });
     spinner.stop();
     const response = completion.choices[0]?.message?.content
-    if (response.isRunnable) {
-        console.log(chalk.bgGreen(response.message));
-        const confirmResponse = await input({message: 'Run it? (y/n)'});
-        if (confirmResponse === 'y') {
-            runGitCommand(response.command);
+    const parsedResponse = JSON.parse(response)
+    if (parsedResponse.isRunnable) {
+        console.log(chalk.green(parsedResponse.message));
+        console.log(chalk.gray.dim(("💡 " + parsedResponse.explanation)));
+
+        const answer = await select({
+            message: 'Run it?',
+            choices: [{
+                name: "Yes",
+                value: "y"
+            }, {
+                name: "No",
+                value: "n"
+            },
+                {
+                    name: "Ask something",
+                    value: "q"
+                }]
+
+        });
+        if (answer === 'y') {
+            runGitCommand(parsedResponse.command);
             const answer = await select({
                 message: 'Done. Should I confirm before running this command next time?',
                 choices: [
@@ -187,11 +205,11 @@ async function processCommand(command) {
                 case "never-any":
                     updateConfig({confirmations: {always: [], never: ["*"]}});
                     break;
-                case `always-${response.message}`:
-                    addCommandToConfirmationList("always", response.message);
+                case `always-${parsedResponse.message}`:
+                    addCommandToConfirmationList("always", parsedResponse.message);
                     break;
-                case `never-${response.message}`:
-                    addCommandToConfirmationList("never", response.message);
+                case `never-${parsedResponse.message}`:
+                    addCommandToConfirmationList("never", parsedResponse.message);
                     break;
             }
 
@@ -208,10 +226,9 @@ async function processCommand(command) {
 
         }
     } else {
-        console.log(chalk.green(response));
-        const followUpResponse = await input({message: ''});
+        console.log(chalk.green(parsedResponse.message))
+        const followUpResponse = await input({message: 'Reply:'});
     }
-
 }
 
 // Custom help and no command provided

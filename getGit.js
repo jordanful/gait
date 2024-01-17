@@ -2,9 +2,13 @@ import {execSync} from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-function runGitCommand(command) {
+function runGitCommand(command, options = {}) {
     try {
-        const output = execSync(`git ${command}`, {encoding: 'utf8'});
+        const output = execSync(`git ${command}`, {
+            encoding: 'utf8',
+            maxBuffer: 10 * 1024 * 1024, // Default buffer size
+            ...options // Merge additional options if provided
+        });
         return output.trim();
     } catch (error) {
         console.error(`Error executing git ${command}:`, error.message);
@@ -12,12 +16,12 @@ function runGitCommand(command) {
     }
 }
 
-function listDirectoryTree(dirPath, depth = 0, maxSubDirs = 10) {
+function listDirectoryTree(dirPath, depth = 0, maxSubDirs = 10, indent = '') {
     if (depth > 10) {
-        return '[Depth limit reached]';
+        return indent + '[Depth limit reached]\n';
     }
 
-    let tree = {};
+    let treeText = '';
     const files = fs.readdirSync(dirPath);
 
     // Exclude certain large directories by name
@@ -36,16 +40,17 @@ function listDirectoryTree(dirPath, depth = 0, maxSubDirs = 10) {
         if (stat.isDirectory()) {
             dirCount++;
             if (dirCount > maxSubDirs) {
-                tree[file] = '[Too many subdirectories]';
+                treeText += indent + file + '/ [Too many subdirectories]\n';
                 return;
             }
-            tree[file] = listDirectoryTree(filePath, depth + 1, maxSubDirs);
+            treeText += indent + file + '/\n';
+            treeText += listDirectoryTree(filePath, depth + 1, maxSubDirs, indent + '    ');
         } else {
-            tree[file] = 'file';
+            treeText += indent + file + '\n';
         }
     });
 
-    return tree;
+    return treeText;
 }
 
 export function gatherGitContext() {
@@ -60,15 +65,22 @@ export function gatherGitContext() {
 
     const commitCount = runGitCommand('rev-list --count HEAD');
     if (commitCount && parseInt(commitCount, 10) > 1) {
-        diff = runGitCommand('diff HEAD~1 HEAD');
+        try {
+            diff = runGitCommand('diff HEAD~1 HEAD', {maxBuffer: 50 * 1024 * 1024});
+        } catch (error) {
+            console.error('Error obtaining diff:', error.message);
+            diff = 'Diff too large to display.';
+        }
+    } else if (parseInt(commitCount, 10) === 1) {
+        diff = runGitCommand('show HEAD');
     } else {
-        diff = 'Not enough commits for diff.';
+        diff = 'No commits yet.';
     }
     const currentWorkingDirectory = process.cwd();
 
 
-    return {
-        directoryTree: JSON.stringify(listDirectoryTree(currentWorkingDirectory), null, 2),
+    const gitContext = {
+        directoryTree: listDirectoryTree(currentWorkingDirectory),
         currentBranch,
         lastCommitMsg,
         status: status.split('\n'),
@@ -76,6 +88,8 @@ export function gatherGitContext() {
         branchList: branchList.split('\n'),
         remoteInfo: remoteInfo.split('\n'),
         branchTrackingInfo: branchTrackingInfo.split('\n'),
-        diff
+        // diff // Skip this for now
     };
+    
+    return gitContext;
 }
