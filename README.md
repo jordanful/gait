@@ -21,6 +21,7 @@ Or if you get stuck in a sticky situation, just describe what you'd like to do a
 
 ## Installation
 
+Get yourself an OpenAI API key (local LLM support coming soon).
 `npm install -g gait`
 
 ## Usage
